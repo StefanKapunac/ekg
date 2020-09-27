@@ -25,8 +25,9 @@ def display_image(image, caption='Image', grayscale=True):
         ax.imshow(img2, interpolation='none')
     # ax.set_title(caption)
     plt.axis('off')
-    # if caption == 'squares':
+    if caption == 'raw signal':
     	# fig.savefig('results/' + caption + '.png', dpi=300, transparent=True)
+    	fig.savefig('raw_signal_2.png', dpi=300, transparent=True)
     # fig.savefig('za_pdf/' + caption + '.png', dpi=150, transparent=True)
     plt.show()
 
@@ -505,11 +506,26 @@ def extract_signal_5(img, signal_zeros_ind, original_img, median_x):
 	    # print(len(signal_ys[l]), len(signal_xs[l]))
 
 	    points = np.array([list(e) for e in zip(signal_xs[l], signal_ys[l])])
-	    cv2.polylines(raw_signal_image, [points], isClosed=False, color=(0,255,0), thickness=5)
+	    cv2.polylines(raw_signal_image, [points], isClosed=False, color=(0,255,0), thickness=2)
 
 	display_image(raw_signal_image, 'raw signal')
 
 	# interpolacija
+	# final_xs = range(x_start, width)
+	# final_ys = [[None for x in final_xs] for i in signal_ys]
+	# # za svaki kanal
+	# for k in range(len(signal_xs)):
+	# 	j = 0
+	# 	for i in final_xs:
+	# 		# print(k, j)
+	# 		if i == signal_xs[k][j]:
+	# 			final_ys[k][i - x_start] = signal_ys[k][j]
+	# 			j += 1
+	# 		else:
+	# 			slope = (signal_ys[k][j] - signal_ys[k][j-1]) / (signal_xs[k][j] - signal_xs[k][j-1])
+	# 			final_ys[k][i - x_start] = int(signal_ys[k][j-1] + slope * (i - signal_xs[k][j-1]))
+
+	# stavi -1 tamo gde bi radio interpolaciju
 	final_xs = range(x_start, width)
 	final_ys = [[None for x in final_xs] for i in signal_ys]
 	# za svaki kanal
@@ -521,8 +537,7 @@ def extract_signal_5(img, signal_zeros_ind, original_img, median_x):
 				final_ys[k][i - x_start] = signal_ys[k][j]
 				j += 1
 			else:
-				slope = (signal_ys[k][j] - signal_ys[k][j-1]) / (signal_xs[k][j] - signal_xs[k][j-1])
-				final_ys[k][i - x_start] = int(signal_ys[k][j-1] + slope * (i - signal_xs[k][j-1]))
+				final_ys[k][i - x_start] = None
 
 
 	return_xs = np.array(final_xs)
@@ -530,7 +545,7 @@ def extract_signal_5(img, signal_zeros_ind, original_img, median_x):
 
 	return_ys = np.array(final_ys)
 	for i in range(len(final_ys)):
-		return_ys[i] -= signal_zeros_ind[i]
+		return_ys[i][return_ys[i] != None] -= signal_zeros_ind[i]
 
 	for i in range(len(final_ys)):
 		plt.plot(return_xs, return_ys[i])
@@ -538,10 +553,39 @@ def extract_signal_5(img, signal_zeros_ind, original_img, median_x):
 
 	return raw_signal_image, return_xs, return_ys
 
+def extract_red_pixels(img):
+	img_hsv = get_hsv(img)
+
+	# lower mask (0-10)
+	lower_red = np.array([0,50,50])
+	upper_red = np.array([10,255,255])
+	mask0 = cv2.inRange(img_hsv, lower_red, upper_red)
+
+	# upper mask (170-180)
+	lower_red = np.array([170,50,50])
+	upper_red = np.array([180,255,255])
+	mask1 = cv2.inRange(img_hsv, lower_red, upper_red)
+
+	# join my masks
+	mask = mask0+mask1
+
+	# set my output img to zero everywhere except my mask
+	output_img = img.copy()
+	# output_img[np.where(mask==0)] = 0
+	output_img = cv2.bitwise_and(output_img, output_img, mask=mask)
+
+	
+
+	display_image(output_img)
 
 def digitize(filename):
 	img = cv2.imread(filename)
 	display_image(img, 'original')
+
+	extract_red_pixels(img)
+
+	# img = cv2.resize(img, dsize=(0,0), fx=2.5, fy=2.5)
+	# display_image(img, 'scaled')
 	
 	gray = get_grayscale(img)
 	display_image(gray, 'grayscale')
@@ -641,20 +685,32 @@ def convert_to_time_voltage(xs, ys, filename):
 	print(f'pixel time: {pixel_time}')
 	print(f'pixel voltage: {pixel_voltage}')
 
+	print(type(leads_ys[0][0]))
+	print(type(leads_ys[0]))
+	print(type(list(leads_ys[0])))
+
 	for i in range(len(lead_names)):
-		time = [x * pixel_time for x in leads_xs]
-		voltage = [y * pixel_voltage for y in leads_ys[i]]
-		digitized[lead_names[i]] = list(zip(time, voltage))
+		digitized[lead_names[i]] = leads_ys[i].tolist()
+
+	final_json = {'info' : {'pixel_time' : pixel_time,
+							'pixel_voltage' : pixel_voltage},
+				  'data': digitized}
+
+
+	# for i in range(len(lead_names)):
+	# 	time = [x * pixel_time for x in leads_xs]
+	# 	voltage = [y * pixel_voltage for y in leads_ys[i]]
+	# 	digitized[lead_names[i]] = list(zip(time, voltage))
 
 
 	with open(f'{filename}.json', 'w') as f:
-		json.dump(digitized, f, indent=4)
+		json.dump(final_json, f, indent=4)
 
 def main():
 	raw_signal_image, final_xs, final_ys = digitize('images/9.jpg')
 	# raw_signal_image, final_xs, final_ys = digitize('images/ecg-sample.jpg')
 
-	convert_to_time_voltage(final_xs, final_ys, 'digitized/9')
+	# convert_to_time_voltage(final_xs, final_ys, 'digitized/9_2')
 
 
 
